@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
+  <title>Catatan Privat</title>
+  <link rel="manifest" href="manifest.json" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('service-worker.js')
+          .then(reg => console.log('Service Worker terdaftar:', reg.scope))
+          .catch(err => console.error('SW gagal:', err));
+      });
+    }
+  </script>
+</head>
+<body class="bg-black text-white min-h-screen relative overflow-x-hidden">
+  <!-- Header -->
+  <div class="flex items-center justify-between px-4 py-3">
+    <div class="flex items-center gap-3">
+      <button onclick="toggleSidebar()" class="w-6 h-6 bg-white text-black font-bold rounded"></button>
+      <h1 class="text-lg font-semibold">Catatan Privat</h1>
+    </div>
+    <img src="anime.jpeg" alt="Profil" class="w-8 h-8 rounded-full object-cover" />
+  </div>
+
+  <!-- Sidebar -->
+  <div id="sidebar" class="fixed top-0 left-0 h-full w-64 bg-black text-white shadow-lg transform -translate-x-full transition-transform duration-300 z-50">
+    <div class="flex justify-between items-center px-4 py-4 border-b border-white/20">
+      <h2 class="text-xl font-semibold">Zarz Keep</h2>
+      <button onclick="toggleSidebar()" class="text-white text-xl font-bold">×</button>
+    </div>
+    <ul class="p-4 space-y-4">
+      <li onclick="showMenu('catatan')" class="flex items-center gap-3 p-2 rounded-lg cursor-pointer"><span></span><span class="font-semibold">Catatan</span></li>
+      <li onclick="showMenu('arsip')" class="flex items-center gap-3 p-2 rounded-lg cursor-pointer"><span></span><span>Arsip</span></li>
+      <li onclick="showMenu('sampah')" class="flex items-center gap-3 p-2 rounded-lg cursor-pointer"><span></span><span>Sampah</span></li>
+      <li class="flex items-center gap-3"><span></span><span>Setelan</span></li>
+      <li class="flex items-center gap-3"><span></span><span>Tentang aplikasi</span></li>
+      <li class="flex items-center gap-3 text-red-500 font-semibold cursor-pointer" onclick="downloadAllNotes()"><span></span><span>Unduh Semua Catatan</span></li>
+    </ul>
+  </div>
+
+  <!-- Overlay -->
+  <div id="overlay" onclick="toggleSidebar()" class="fixed inset-0 bg-black bg-opacity-50 hidden z-40"></div>
+
+  <!-- Kontainer Catatan -->
+  <div class="px-4 mt-6" id="notesSection">
+    <div id="notesContainer" class="grid grid-cols-2 gap-4"></div>
+    <p id="noNotesMessage" class="text-center text-white text-opacity-70 mt-8 hidden">Tidak ada catatan</p>
+  </div>
+
+  <!-- Kontainer Arsip -->
+  <div class="px-4 mt-6 hidden" id="arsipSection"></div>
+
+  <!-- Kontainer Sampah -->
+  <div class="px-4 mt-6 hidden" id="sampahSection"></div>
+
+  <!-- Tombol tambah -->
+  <button onclick="toggleMenu()" class="fixed bottom-6 right-6 bg-blue-500 text-white text-3xl rounded-full w-14 h-14 flex items-center justify-center shadow-lg z-30">+</button>
+
+  <!-- Popup Menu -->
+  <div id="popupMenu" class="hidden flex-col fixed bottom-28 right-6 z-40 transition-all duration-300 transform scale-90 opacity-0 space-y-4">
+    <label class="bg-blue-700 text-white w-40 px-4 py-2 rounded-full flex items-center justify-between shadow-lg cursor-pointer">
+      <span></span><span>Tambahkan Gambar</span>
+      <input type="file" accept="image/*" onchange="addImageNote(event)" class="hidden" />
+    </label>
+    <button onclick="openEditor()" class="bg-blue-700 text-white w-40 px-4 py-2 rounded-full flex items-center justify-between shadow-lg">
+      <span></span><span>Teks</span>
+    </button>
+    <button onclick="toggleMenu()" class="bg-blue-200 text-black w-40 px-4 py-2 rounded-full shadow-lg font-bold">×</button>
+  </div>
+
+  <!-- Editor Catatan -->
+  <div id="noteEditor" class="hidden fixed inset-0 bg-black text-white z-50 flex flex-col">
+    <div class="flex items-center justify-between px-4 py-3 border-b border-white/20">
+      <button onclick="closeEditor()" class="text-2xl"></button>
+      <button onclick="saveNote()" title="Simpan" class="text-white text-xl"></button>
+    </div>
+    <div class="flex flex-col p-4 gap-3">
+      <input id="noteTitle" type="text" placeholder="Judul" class="bg-black text-white text-2xl font-semibold outline-none" />
+      <textarea id="noteBody" rows="10" placeholder="Catatan" class="bg-black text-white text-base outline-none resize-none"></textarea>
+    </div>
+  </div>
+
+  <script>
+    const NOTES_KEY = "my_notes";
+    const ARSIP_KEY = "my_arsip";
+    const SAMPAH_KEY = "my_sampah";
+
+    function toggleSidebar() {
+      sidebar.classList.toggle("translate-x-0");
+      sidebar.classList.toggle("-translate-x-full");
+      overlay.classList.toggle("hidden");
+    }
+
+    function toggleMenu() {
+      if (popupMenu.classList.contains("hidden")) {
+        popupMenu.classList.remove("hidden");
+        setTimeout(() => popupMenu.classList.replace("scale-90", "scale-100"), 10);
+        popupMenu.classList.replace("opacity-0", "opacity-100");
+      } else {
+        popupMenu.classList.replace("scale-100", "scale-90");
+        popupMenu.classList.replace("opacity-100", "opacity-0");
+        setTimeout(() => popupMenu.classList.add("hidden"), 200);
+      }
+    }
+
+    function openEditor(existingNote = null) {
+      noteEditor.classList.remove("hidden");
+      if (existingNote) {
+        noteTitle.value = existingNote.querySelector("strong")?.innerText || "";
+        noteBody.value = existingNote.querySelector("small")?.innerText || "";
+        noteEditor.setAttribute("data-editing-id", existingNote.id);
+      } else {
+        noteTitle.value = "";
+        noteBody.value = "";
+        noteEditor.removeAttribute("data-editing-id");
+      }
+    }
+
+    function openEditorFromData(json) {
+      const note = JSON.parse(json);
+      noteEditor.classList.remove("hidden");
+      noteTitle.value = note.title || "";
+      noteBody.value = note.body || "";
+      noteEditor.removeAttribute("data-editing-id");
+    }
+
+    function closeEditor() {
+      noteEditor.classList.add("hidden");
+    }
+
+    function saveNote() {
+      const title = noteTitle.value.trim();
+      const body = noteBody.value.trim();
+      const editingId = noteEditor.getAttribute("data-editing-id");
+
+      if (title === "" && body === "") {
+        closeEditor();
+        return;
+      }
+
+      if (editingId) {
+        const existing = document.getElementById(editingId);
+        existing.querySelector("strong").innerText = title || "(Tanpa Judul)";
+        existing.querySelector("small").innerText = body;
+      } else {
+        const id = "note-" + Date.now();
+        const note = document.createElement("div");
+        note.id = id;
+        note.className = "border border-white/20 rounded-lg p-3";
+        note.innerHTML = `
+          <div class="flex justify-between items-start">
+            <div onclick="editNote(this.parentElement.parentElement)" class="cursor-pointer">
+              <strong>${title || "(Tanpa Judul)"}</strong><br>
+              <small>${body}</small>
+            </div>
+            <div class="flex flex-col gap-1 items-end ml-2">
+              <button onclick="deleteNote('${id}')" title="Hapus"></button>
+              <button onclick="archiveNote('${id}')" title="Arsipkan"></button>
+            </div>
+          </div>`;
+        notesContainer.appendChild(note);
+      }
+
+      saveToLocalStorage();
+      toggleNoNotesMessage();
+      closeEditor();
+    }
+
+    function deleteNote(id) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const note = extractNoteData(el);
+      const stored = JSON.parse(localStorage.getItem(SAMPAH_KEY) || "[]");
+      stored.push(note);
+      localStorage.setItem(SAMPAH_KEY, JSON.stringify(stored));
+      el.remove();
+      saveToLocalStorage();
+      toggleNoNotesMessage();
+      loadSampah();
+    }
+
+    function archiveNote(id) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const note = extractNoteData(el);
+      const stored = JSON.parse(localStorage.getItem(ARSIP_KEY) || "[]");
+      stored.push(note);
+      localStorage.setItem(ARSIP_KEY, JSON.stringify(stored));
+      el.remove();
+      saveToLocalStorage();
+      toggleNoNotesMessage();
+      loadArsip();
+    }
+
+    function extractNoteData(el) {
+      return {
+        title: el.querySelector("strong")?.innerText || "",
+        body: el.querySelector("small")?.innerText || "",
+        img: el.querySelector("img")?.src || null
+      };
+    }
+
+    function editNote(noteElement) {
+      openEditor(noteElement);
+    }
+
+    function toggleNoNotesMessage() {
+      const notes = document.querySelectorAll("#notesContainer > div");
+      noNotesMessage.classList.toggle("hidden", notes.length > 0);
+    }
+
+    function addImageNote(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      const id = "note-" + Date.now();
+      reader.onload = function(e) {
+        const note = document.createElement("div");
+        note.id = id;
+        note.className = "border border-white/20 rounded-lg p-3";
+        note.innerHTML = `
+          <div class="flex justify-between items-start">
+            <div onclick="editNote(this.parentElement.parentElement)" class="cursor-pointer">
+              <img src="${e.target.result}" class="w-full h-auto rounded mb-2" />
+              <small>Gambar ditambahkan</small>
+            </div>
+            <div class="flex flex-col gap-1 items-end ml-2">
+              <button onclick="deleteNote('${id}')" title="Hapus"></button>
+              <button onclick="archiveNote('${id}')" title="Arsipkan"></button>
+            </div>
+          </div>`;
+        notesContainer.appendChild(note);
+        saveToLocalStorage();
+        toggleNoNotesMessage();
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function showMenu(menu) {
+      notesSection.classList.add("hidden");
+      arsipSection.classList.add("hidden");
+      sampahSection.classList.add("hidden");
+
+      document.querySelectorAll('#sidebar li').forEach(li => li.classList.remove('bg-blue-600'));
+
+      if (menu === 'catatan') {
+        notesSection.classList.remove("hidden");
+        document.querySelector('#sidebar li:nth-child(1)').classList.add('bg-blue-600');
+        toggleNoNotesMessage();
+      } else if (menu === 'arsip') {
+        arsipSection.classList.remove("hidden");
+        document.querySelector('#sidebar li:nth-child(2)').classList.add('bg-blue-600');
+        loadArsip();
+      } else if (menu === 'sampah') {
+        sampahSection.classList.remove("hidden");
+        document.querySelector('#sidebar li:nth-child(3)').classList.add('bg-blue-600');
+        loadSampah();
+      }
+
+      toggleSidebar();
+    }
+
+    function undoFromArsip(index) {
+      const arsips = JSON.parse(localStorage.getItem(ARSIP_KEY) || "[]");
+      const note = arsips.splice(index, 1)[0];
+      const existing = JSON.parse(localStorage.getItem(NOTES_KEY) || "[]");
+      existing.push(note);
+      localStorage.setItem(NOTES_KEY, JSON.stringify(existing));
+      localStorage.setItem(ARSIP_KEY, JSON.stringify(arsips));
+      loadArsip();
+      loadNotesFromLocalStorage(true);
+    }
+
+    function undoFromSampah(index) {
+      const sampah = JSON.parse(localStorage.getItem(SAMPAH_KEY) || "[]");
+      const note = sampah.splice(index, 1)[0];
+      const existing = JSON.parse(localStorage.getItem(NOTES_KEY) || "[]");
+      existing.push(note);
+      localStorage.setItem(NOTES_KEY, JSON.stringify(existing));
+      localStorage.setItem(SAMPAH_KEY, JSON.stringify(sampah));
+      loadSampah();
+      loadNotesFromLocalStorage(true);
+    }
+
+    function loadArsip() {
+      arsipSection.innerHTML = "";
+      const arsips = JSON.parse(localStorage.getItem(ARSIP_KEY) || "[]");
+      if (arsips.length === 0) return arsipSection.innerHTML = '<p class="text-center text-white text-opacity-70 mt-8">Tidak ada arsip</p>';
+      arsips.forEach((note, i) => {
+        const el = document.createElement("div");
+        el.className = "border border-white/20 rounded-lg p-3 mb-3";
+        const img = note.img ? `<img src="${note.img}" class="w-full h-auto rounded mb-2" />` : "";
+        el.innerHTML = `
+          <div onclick="openEditorFromData('${JSON.stringify(note)}')" class="cursor-pointer">
+            ${img}<strong>${note.title}</strong><br><small>${note.body}</small>
+          </div>
+          <div class="text-right mt-2">
+            <button onclick="undoFromArsip(${i})" class="text-sm text-blue-400"> Urungkan</button>
+          </div>`;
+        arsipSection.appendChild(el);
+      });
+    }
+
+    function loadSampah() {
+      sampahSection.innerHTML = "";
+      const sampah = JSON.parse(localStorage.getItem(SAMPAH_KEY) || "[]");
+      if (sampah.length === 0) return sampahSection.innerHTML = '<p class="text-center text-white text-opacity-70 mt-8">Tidak ada sampah</p>';
+      sampah.forEach((note, i) => {
+        const el = document.createElement("div");
+        el.className = "border border-white/20 rounded-lg p-3 mb-3";
+        const img = note.img ? `<img src="${note.img}" class="w-full h-auto rounded mb-2" />` : "";
+        el.innerHTML = `
+          <div onclick="openEditorFromData('${JSON.stringify(note)}')" class="cursor-pointer">
+            ${img}<strong>${note.title}</strong><br><small>${note.body}</small>
+          </div>
+          <div class="text-right mt-2">
+            <button onclick="undoFromSampah(${i})" class="text-sm text-blue-400"> Urungkan</button>
+          </div>`;
+        sampahSection.appendChild(el);
+      });
+    }
+
+    function saveToLocalStorage() {
+      const notes = [];
+      document.querySelectorAll("#notesContainer > div").forEach(el => {
+        notes.push(extractNoteData(el));
+      });
+      localStorage.setItem(NOTES_KEY, JSON.stringify(notes));
+    }
+
+    function loadNotesFromLocalStorage(forceClear = false) {
+      if (forceClear) notesContainer.innerHTML = "";
+
+      const stored = JSON.parse(localStorage.getItem(NOTES_KEY) || "[]");
+      stored.forEach(note => {
+        const id = "note-" + Date.now() + Math.random();
+        const el = document.createElement("div");
+        el.id = id;
+        el.className = "border border-white/20 rounded-lg p-3";
+        const imgHTML = note.img ? `<img src="${note.img}" class="w-full h-auto rounded mb-2" />` : "";
+        el.innerHTML = `
+          <div class="flex justify-between items-start">
+            <div onclick="editNote(this.parentElement.parentElement)" class="cursor-pointer">
+              ${imgHTML}
+              <strong>${note.title || "(Tanpa Judul)"}</strong><br>
+              <small>${note.body}</small>
+            </div>
+            <div class="flex flex-col gap-1 items-end ml-2">
+              <button onclick="deleteNote('${id}')" title="Hapus"></button>
+              <button onclick="archiveNote('${id}')" title="Arsipkan"></button>
+            </div>
+          </div>`;
+        notesContainer.appendChild(el);
+      });
+      toggleNoNotesMessage();
+    }
+
+    function downloadAllNotes() {
+      const notes = document.querySelectorAll("#notesContainer div");
+      let content = "";
+      notes.forEach((note, i) => {
+        content += `Catatan ${i + 1}:\n${note.innerText}\n\n`;
+      });
+      const zip = new JSZip();
+      zip.file("catatan.txt", content);
+      zip.generateAsync({ type: "blob" }).then(blob => {
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = "catatan.zip";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      });
+    }
+
+    window.onload = () => loadNotesFromLocalStorage();
+  </script>
+</body>
+</html>
